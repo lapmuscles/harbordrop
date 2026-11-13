@@ -1,0 +1,26 @@
+{
+  "name": "@harbordrop/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/runtime/node.ts",
+    "start": "tsx src/runtime/node.ts",
+    "gen:migrations": "node scripts/gen-migrations.mjs",
+    "build": "node scripts/gen-migrations.mjs && esbuild src/runtime/node.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/server.mjs --external:better-sqlite3 --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\""
+  },
+  "dependencies": {
+    "@harbordrop/shared": "*",
+    "@hono/node-server": "^2.1.8",
+    "aws4fetch": "^1.0.20",
+    "better-sqlite3": "^12.4.1",
+    "hono": "^4.13.18"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251101.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "wrangler": "^4.162.0"
+  }
+}

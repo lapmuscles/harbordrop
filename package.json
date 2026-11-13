@@ -1,0 +1,28 @@
+{
+  "name": "harbordrop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/backend",
+    "packages/frontend"
+  ],
+  "scripts": {
+    "build": "npm run build -w @harbordrop/frontend && npm run build -w @harbordrop/backend",
+    "test": "vitest run",
+    "dev:backend": "npm run dev -w @harbordrop/backend",
+    "dev:frontend": "npm run dev -w @harbordrop/frontend",
+    "start": "node packages/backend/dist/server.mjs",
+    "deploy:workers": "npm run build -w @harbordrop/frontend && npx wrangler deploy",
+    "typecheck": "tsc -p packages/backend/tsconfig.json"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

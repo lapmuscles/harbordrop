@@ -1,0 +1,24 @@
+# Cloudflare Workers 部署設定（說明見 README-zhTW.md）
+name = "harbordrop"
+main = "packages/backend/src/runtime/worker.ts"
+compatibility_date = "2025-11-01"
+
+[assets]
+directory = "packages/frontend/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/dav", "/dav/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "harbordrop"
+database_id = "00000000-0000-0000-0000-000000000000" # 改成 `wrangler d1 create harbordrop` 回傳的 ID
+migrations_dir = "packages/backend/src/db/migrations"
+
+# 每分鐘喚醒一次：清理過期上傳工作階段、執行排程工作
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+ADMIN_USERNAME = "admin"
+# 機密請用：npx wrangler secret put APP_SECRET / ADMIN_PASSWORD
