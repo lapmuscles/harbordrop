@@ -9,6 +9,8 @@
  * 才使用 `put`（經後端，Workers 受請求體上限限制）或自訂的分片中繼協定。
  */
 
+import type { Db } from "../db/adapter";
+
 export type Platform = "workers" | "node";
 
 export type ConfigFieldType = "string" | "secret" | "number" | "boolean" | "select" | "textarea";
@@ -81,6 +83,8 @@ export interface UploadInitInput {
   mime?: string;
   sha256?: string;
   partSize?: number;
+  /** 瀏覽器請求的 Origin 標頭（gdrive resumable session 需綁定，CORS 才會放行） */
+  origin?: string;
 }
 
 export interface UploadInitResult {
@@ -142,6 +146,12 @@ export interface StorageDriver {
   uploadAction?(session: UploadSessionView, action: string, input: UploadActionInput): Promise<UploadActionResult>;
   completeUpload?(session: UploadSessionView, body: any): Promise<{ entry: FileEntry; meta?: Record<string, unknown> }>;
   abortUpload?(session: UploadSessionView): Promise<void>;
+
+  // —— 分片中繼（chunk-relay）：每片經後端轉送到渠道 ——
+  /** 收下第 index 片（0 起算）並轉送到渠道 */
+  uploadChunk?(session: UploadSessionView, index: number, body: Uint8Array): Promise<{ index: number; size: number }>;
+  /** 已收到的分片（續傳用） */
+  listChunks?(session: UploadSessionView): Promise<{ index: number; size: number }[]>;
 }
 
 export interface DriverContext {
@@ -149,6 +159,10 @@ export interface DriverContext {
   fetch: typeof fetch;
   /** Node 的資料目錄（local 驅動用） */
   dataDir?: string;
+  /** 資料庫（分片中繼渠道存放 relay_objects 用；由 StorageService 注入） */
+  db?: Db;
+  /** 目前驅動所屬的儲存 ID（由 StorageService 注入） */
+  storageId?: number;
 }
 
 export interface DriverDefinition {
@@ -160,6 +174,16 @@ export interface DriverDefinition {
   platforms?: Platform[];
   /** 唯讀渠道（mirror） */
   readonly?: boolean;
+  /** 選用：OAuth 授權流程（storages 模組的 /oauth/:type/start 與 /callback 使用），用來取得 refresh token */
+  oauth?: DriverOAuth;
   /** config 已合併機密欄位（已解密） */
   create(config: Record<string, any>, ctx: DriverContext): StorageDriver;
+}
+
+/** 驅動的 OAuth 授權 hook。config 為該儲存目前的設定（已合併機密） */
+export interface DriverOAuth {
+  /** 存放 refresh token 的 secret 欄位 key */
+  tokenField: string;
+  authorizeUrl(input: { config: Record<string, any>; redirectUri: string; state: string }): string;
+  exchangeCode(input: { config: Record<string, any>; redirectUri: string; code: string; fetch: typeof fetch }): Promise<{ refreshToken: string }>;
 }

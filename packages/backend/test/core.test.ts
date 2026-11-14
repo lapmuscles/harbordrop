@@ -15,7 +15,7 @@ import { join } from "node:path";
 describe("資料庫", () => {
   it("遷移建立完整資料表，且可重複執行", async () => {
     const db = createSqliteDb(new Database(":memory:"));
-    expect(await migrate(db)).toEqual(["0001_init.sql"]);
+    expect(await migrate(db)).toEqual(MIGRATIONS.map((m) => m.name));
     expect(await migrate(db)).toEqual([]);
     const tables = (await db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")).map((r) => r.name);
     for (const t of ["admins", "sessions", "api_keys", "api_key_acl", "settings", "storages", "mounts", "upload_sessions", "shares", "pastes", "fs_meta", "search_index", "scheduled_jobs", "tasks"])

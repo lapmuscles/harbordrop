@@ -2,11 +2,13 @@ import type { HdModule } from "../types";
 import { requireAdmin } from "../../core/auth";
 import { badRequest } from "../../core/errors";
 import { DRIVERS } from "../../storage/registry";
+import { mountStorageOAuth } from "./oauth";
 
 /** 儲存設定 CRUD（僅管理員）。回應永不含機密欄位值 */
 export const storagesModule: HdModule = {
   name: "storages",
   routes(app) {
+    mountStorageOAuth(app); // feat/ms-google
     app.get("/api/admin/storage-types", (c) => {
       requireAdmin(c);
       const platform = c.get("ctx").platform;
@@ -17,6 +19,7 @@ export const storagesModule: HdModule = {
           description: d.description,
           fields: d.fields,
           readonly: d.readonly,
+          oauth: !!d.oauth,
         })),
       );
     });

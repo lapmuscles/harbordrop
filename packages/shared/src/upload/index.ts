@@ -3,12 +3,18 @@ import type { HdClient } from "./api";
 import type { UploadHooks, UploadStats } from "./common";
 import { uploadXet } from "./xet";
 import { uploadS3Multipart } from "./s3";
+import { uploadChunkRelay } from "./chunk-relay";
+import { uploadGraphSession } from "./graph";
+import { uploadGDriveResumable } from "./gdrive";
 
 export * from "./api";
 export * from "./common";
 export * from "./retry";
 export { uploadXet } from "./xet";
 export { uploadS3Multipart } from "./s3";
+export { uploadChunkRelay } from "./chunk-relay";
+export { uploadGraphSession, graphNextOffset } from "./graph";
+export { uploadGDriveResumable, gdriveNextOffset } from "./gdrive";
 
 /**
  * 協定實作表。新增渠道的瀏覽器直傳協定：實作 (api, session, file, hooks) => 完成 body，加到這裡。
@@ -20,6 +26,19 @@ export const PROTOCOLS: Record<string, ProtocolHandler> = {
   "s3-multipart": async (api, s, file, hooks) => {
     const { stats, parts } = await uploadS3Multipart(api, s, file, hooks);
     return { stats, completeBody: { parts } };
+  },
+  "chunk-relay": async (api, s, file, hooks) => {
+    const { stats, chunkCount } = await uploadChunkRelay(api, s, file, hooks);
+    return { stats, completeBody: { chunkCount } };
+  },
+  // feat/ms-google
+  "graph-upload-session": async (api, s, file, hooks) => {
+    const { stats, item } = await uploadGraphSession(api, s, file, hooks);
+    return { stats, completeBody: { item: item ? { id: item.id, size: item.size } : null } };
+  },
+  "gdrive-resumable": async (api, s, file, hooks) => {
+    const { stats, id } = await uploadGDriveResumable(api, s, file, hooks);
+    return { stats, completeBody: { id } };
   },
 };
 

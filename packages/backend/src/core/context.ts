@@ -19,6 +19,8 @@ export interface RuntimeEnv {
   SESSION_TTL_HOURS?: string;
   /** 對外網址（反向代理後方時用來產生絕對 URL），例如 https://drop.example.com */
   PUBLIC_URL?: string;
+  /** 1／true：信任 X-Real-IP／X-Forwarded-For（Node 在反向代理後方時設定；預設不信任） */
+  TRUST_PROXY?: string;
 }
 
 export interface AppContext {
@@ -71,7 +73,11 @@ async function ensureAdmin(ctx: AppContext) {
   if (!existing && (count?.n ?? 0) === 0) {
     await ctx.db.run("INSERT INTO admins (username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)", [u, await hashPassword(p), now, now]);
   } else if (existing && ADMIN_RESET === "1") {
-    await ctx.db.run("UPDATE admins SET password_hash = ?, updated_at = ? WHERE id = ?", [await hashPassword(p), now, existing.id]);
+    // 重設時一併關閉兩步驟驗證（遺失驗證器時的救援途徑）
+    await ctx.db.run(
+      "UPDATE admins SET password_hash = ?, totp_secret = NULL, totp_pending_secret = NULL, totp_enabled = 0, totp_last_step = NULL, updated_at = ? WHERE id = ?",
+      [await hashPassword(p), now, existing.id],
+    );
     await ctx.db.run("DELETE FROM sessions WHERE admin_id = ?", [existing.id]);
   }
 }

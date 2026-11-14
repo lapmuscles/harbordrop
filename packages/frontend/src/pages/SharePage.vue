@@ -30,7 +30,7 @@ const contentUrl = (inline: boolean) => {
   const qs = q.toString();
   return `/api/shares/${encodeURIComponent(slug)}/content${qs ? `?${qs}` : ""}`;
 };
-const preview = computed(() => (info.value ? previewComponent(info.value.previewKind) : null));
+const preview = computed(() => (info.value ? previewComponent(info.value.previewKind, info.value.filename) : null));
 
 async function unlock() {
   error.value = "";

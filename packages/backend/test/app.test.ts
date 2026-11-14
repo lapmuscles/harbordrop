@@ -121,9 +121,4 @@ describe("上傳與分享", () => {
     expect(memFiles.size).toBe(0);
     expect((await h.call("GET", `/api/shares/${done!.json.share.slug}`)).status).toBe(404);
   });
-  it("預留模組回應 501", async () => {
-    const h = await setup();
-    for (const p of ["/api/fs/list", "/api/pastes", "/api/admin/api-keys", "/api/search?q=a", "/api/admin/tasks"])
-      expect((await h.call("GET", p, undefined, h.auth)).status).toBe(501);
-  });
 });

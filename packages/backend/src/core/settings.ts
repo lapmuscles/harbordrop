@@ -9,6 +9,10 @@ export interface SettingDef {
   default: unknown;
   public?: boolean;
   label: string;
+  /** 前端輸入元件提示：textarea = 多行文字 */
+  input?: "textarea";
+  /** 下拉選項（設定頁顯示為 select） */
+  options?: { value: string; label: string }[];
 }
 
 export const CORE_SETTINGS: SettingDef[] = [

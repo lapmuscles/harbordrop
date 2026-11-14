@@ -39,12 +39,17 @@ function edit(s: StorageDto) {
   Object.assign(form.config, s.config);
   editing.value = { id: s.id, secretsSet: s.secretsSet };
 }
+async function persist(): Promise<number> {
+  const body = { ...form, config: { ...form.config } };
+  let id = editing.value?.id;
+  if (id) await api.json("PUT", `/api/admin/storages/${id}`, body);
+  else id = (await api.json<StorageDto>("POST", "/api/admin/storages", body)).id;
+  return id;
+}
 async function save() {
   err.value = "";
   try {
-    const body = { ...form, config: { ...form.config } };
-    if (editing.value?.id) await api.json("PUT", `/api/admin/storages/${editing.value.id}`, body);
-    else await api.json("POST", "/api/admin/storages", body);
+    await persist();
     editing.value = null;
     await load();
     await refreshSession();
@@ -52,6 +57,32 @@ async function save() {
     err.value = e.message;
   }
 }
+
+// --- feat/admin-ui：OAuth 授權（OneDrive / Google Drive 等 driver.oauth） ---
+const hasOAuth = computed(() => !!(typeInfo.value as (StorageTypeInfo & { oauth?: boolean }) | undefined)?.oauth);
+const oauthRedirect = ref("");
+const oauthBusy = ref(false);
+/** 預設的 redirect URI（後端若設定 PUBLIC_URL，實際值以 start?format=json 回傳為準） */
+const redirectUri = computed(() => oauthRedirect.value || `${location.origin}/api/admin/storages/oauth/${encodeURIComponent(form.type)}/callback`);
+function oauthProvider(): string {
+  return typeInfo.value?.label ?? form.type;
+}
+async function authorize() {
+  err.value = "";
+  oauthBusy.value = true;
+  try {
+    // 先儲存（授權需要 storageId 與已儲存的 client_id／secret）
+    const id = await persist();
+    editing.value = { id, secretsSet: editing.value?.secretsSet ?? [] };
+    const r = await api.json<{ url: string; redirectUri: string }>("GET", `/api/admin/storages/oauth/${encodeURIComponent(form.type)}/start?storageId=${id}&format=json`);
+    oauthRedirect.value = r.redirectUri;
+    location.href = r.url;
+  } catch (e: any) {
+    err.value = e.message;
+    oauthBusy.value = false;
+  }
+}
+// --- end feat/admin-ui ---
 async function remove(s: StorageDto) {
   if (!confirm(t("admin.confirmDelete"))) return;
   await api.json("DELETE", `/api/admin/storages/${s.id}`);
@@ -111,6 +142,14 @@ async function test(s: StorageDto) {
       <label class="row"><input v-model="form.enabled" type="checkbox" /> {{ t("admin.enabled") }}</label>
       <label class="row"><input v-model="form.isDefault" type="checkbox" /> {{ t("admin.isDefault") }}</label>
       <label class="row"><input v-model="form.allowAnonymousUpload" type="checkbox" /> {{ t("admin.allowAnon") }}</label>
+    </div>
+    <div v-if="hasOAuth" class="card" style="margin-top: 10px">
+      <p class="muted">{{ t("adminui.oauth.redirectUri", { provider: oauthProvider() }) }}</p>
+      <input :value="redirectUri" readonly style="font-family: monospace" @focus="($event.target as HTMLInputElement).select()" />
+      <p v-if="!editing.id" class="muted">{{ t("adminui.oauth.saveFirst") }}</p>
+      <button type="button" style="margin-top: 8px" :disabled="oauthBusy" @click="authorize">
+        {{ oauthBusy ? t("adminui.oauth.starting") : t("adminui.oauth.authorize") }}
+      </button>
     </div>
     <p v-if="err" class="error">{{ err }}</p>
     <div class="row"><button>{{ t("admin.save") }}</button><button type="button" class="ghost" @click="editing = null">{{ t("upload.cancel") }}</button></div>

@@ -10,5 +10,6 @@ services:
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?請在 .env 設定 ADMIN_PASSWORD}"
       # PUBLIC_URL: "https://drop.example.com"   # 反向代理後方時設定
+      # TRUST_PROXY: "true"                      # 反向代理後方時才設定：以 X-Forwarded-For 判斷用戶端 IP
     volumes:
       - ./data:/data

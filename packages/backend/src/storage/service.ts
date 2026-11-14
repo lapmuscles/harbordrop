@@ -76,7 +76,7 @@ export class StorageService {
       }
     }
     // 先試建驅動，及早回報設定錯誤
-    def.create({ ...config, ...secrets }, this.dctx);
+    def.create({ ...config, ...secrets }, { ...this.dctx, db: this.dctx.db ?? this.db });
     return { config, sealed: await this.box.seal(secrets) };
   }
 
@@ -90,7 +90,7 @@ export class StorageService {
     if (cached && cached.stamp === r.updated_at) return cached.driver;
     const def = getDriverDef(r.type);
     if (!def) throw badRequest(`不支援的儲存類型：${r.type}`);
-    const driver = def.create({ ...JSON.parse(r.config), ...(await this.box.open(r.secrets)) }, this.dctx);
+    const driver = def.create({ ...JSON.parse(r.config), ...(await this.box.open(r.secrets)) }, { ...this.dctx, db: this.dctx.db ?? this.db, storageId: r.id });
     this.drivers.set(r.id, { stamp: r.updated_at, driver });
     return driver;
   }

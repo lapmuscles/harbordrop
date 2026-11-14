@@ -13,6 +13,7 @@ import { searchModule } from "./search";
 import { backupModule } from "./backup";
 import { jobsModule } from "./jobs";
 import { tasksModule } from "./tasks";
+import { siteModule } from "./site";
 
 /** 所有功能模組（順序 = 路由註冊順序；authenticate 依此順序嘗試） */
 export const MODULES: HdModule[] = [
@@ -31,4 +32,5 @@ export const MODULES: HdModule[] = [
   backupModule,
   jobsModule,
   tasksModule,
+  siteModule,
 ];

@@ -1,5 +1,23 @@
 # 變更紀錄
 
+## 1.0.0（2026-11-14）— 全功能版
+
+### 新增
+- **儲存渠道**：WebDAV、本機（僅 Node／Docker）、GitHub（Contents API，>1000 項改用 Git Trees）、Telegram（每片 ≤20MB）、Discord（預設 8MiB／片）、OneDrive（Graph 上傳工作階段直傳，global／cn、個人／商務／SharePoint）、Google Drive（resumable 直傳）、唯讀鏡像（Apache／Nginx 目錄索引、GitHub Releases）。連同既有 S3、HuggingFace 共 10 種驅動。
+- **分片中繼協定 chunk-relay**：瀏覽器逐片上傳經後端轉送，失敗只重傳該片、可續傳；`relay_objects` 存分片清單，下載串接並支援 Range。
+- **OAuth 授權**：OneDrive／Google Drive 在儲存頁一鍵授權取得 refresh token（簽章 state、加密存放）。
+- **掛載與檔案總管**：虛擬目錄、`/files` 檔案總管（清單／格狀、排序、多選、拖曳上傳佇列、重新命名、複製、搬移、刪除、分享、預覽、目錄密碼解鎖、README／header）；跨儲存複製搬移走背景任務。
+- **目錄規則（fs meta）**：隱藏、密碼、套用子目錄，所有祖先皆檢查。
+- **背景任務與排程**：任務列表（進度、取消）；排程工作（cleanup.expired、search.reindex、backup.export、pastes.cleanup），Workers Cron 與 Node 每 60 秒推進。
+- **WebDAV 伺服器** `/dav`：PROPFIND、GET（Range）、PUT、DELETE、MKCOL、MOVE、COPY、假 LOCK；Basic Auth（管理員或 API 金鑰），依 ACL 檢查。
+- **搜尋**：SQLite FTS5（trigram，不支援時退回 unicode61／LIKE），分段重建索引。
+- **API 金鑰與 ACL**：權限 + 路徑前綴、路徑穿越防護。
+- **帳號安全**：登入失敗 5 次鎖 15 分鐘、TOTP 兩步驟、修改密碼；`TRUST_PROXY` 控制是否信任代理標頭。
+- **備份還原**：JSON 匯出、merge／replace 匯入；可排程匯出到儲存。
+- **Paste**：Markdown／程式碼文字分享，密碼、到期、次數上限；匿名建立可開關並限流。
+- **預覽**：Markdown、程式碼高亮、Word／Excel／CSV（本地）、PowerPoint（同意後用 Office Online）、EPUB。
+- **管理儀表板、站台設定（站名、公告、頁尾、匿名上限）、PWA（不快取 /api、/dav）**。
+
 ## 0.1.0（2026-11-13）— 核心版
 
 全新重寫（不沿用 cloudharbor 程式碼）。

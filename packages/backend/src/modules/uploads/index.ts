@@ -1,3 +1,4 @@
+import { anonClientIp, hitAnonLimit } from "../../core/anonlimit";
 import type { HdModule } from "../types";
 import type { AppContext, HdContext } from "../../core/context";
 import { can, principalId } from "../../core/auth";
@@ -13,6 +14,8 @@ import type { UploadInitRequest, UploadInitResponse, UploadCompleteResponse } fr
  *   POST   /api/uploads                     建立工作階段（回傳 uploadToken 與協定參數）
  *   GET    /api/uploads/:id                 查詢狀態（續傳用）
  *   ALL    /api/uploads/:id/action/:name/*  協定步驟（交給驅動 uploadAction）
+ *   POST   /api/uploads/:id/chunk?index=N   chunk-relay：上傳第 N 片（原始位元組，經後端轉送到渠道）
+ *   GET    /api/uploads/:id/chunk           chunk-relay：已收到的分片（續傳用）
  *   POST   /api/uploads/:id/complete        完成並建立分享
  *   DELETE /api/uploads/:id                 中止
  * 後續請求以 X-Upload-Token 標頭驗證（匿名上傳者亦可續傳）。
@@ -109,6 +112,7 @@ export const uploadsModule: HdModule = {
         if (!(await ctx.settings.get("allowAnonymousUpload")) || !row.allow_anonymous_upload) throw forbidden("未開放匿名上傳");
         const max = Number(await ctx.settings.get("anonymousMaxBytes")) || 0;
         if (max && b.size > max) throw badRequest(`檔案超過匿名上傳上限（${max} 位元組）`, "too_large");
+        await hitAnonLimit(ctx, "upload", anonClientIp(c));
       } else if (!can(p, "upload", { storageId: row.id, path: "/" })) throw forbidden();
       const driver = await ctx.storage.driverFor(row);
       if (!driver.initUpload) throw badRequest("此儲存不支援瀏覽器直傳");
@@ -116,7 +120,7 @@ export const uploadsModule: HdModule = {
       const objectPath = renderUploadPath(String(await ctx.settings.get("uploadPathTemplate")), filename);
       const shareOpts = await prepareShareOptions(ctx, b.share, { anonymous });
       const mime = b.mime || guessMime(filename);
-      const init = await driver.initUpload({ path: objectPath, filename, size: b.size, mime });
+      const init = await driver.initUpload({ path: objectPath, filename, size: b.size, mime, origin: c.req.header("origin") ?? origin(c) });
       const id = randomId(16);
       const token = randomToken(24);
       const now = Date.now();
@@ -156,6 +160,30 @@ export const uploadsModule: HdModule = {
     };
     app.all("/api/uploads/:id/action/:name", action);
     app.all("/api/uploads/:id/action/:name/*", action);
+
+    // —— chunk-relay：每片經後端轉送到渠道（片大小由驅動決定）——
+    app.post("/api/uploads/:id/chunk", async (c) => {
+      const ctx = c.get("ctx");
+      const r = await loadSession(c);
+      if (["completed", "aborted"].includes(r.state)) throw badRequest("工作階段已結束");
+      const driver = await ctx.storage.driver(r.storage_id);
+      if (!driver.uploadChunk) throw badRequest("此儲存不支援分片中繼上傳");
+      const raw = c.req.query("index");
+      const index = raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : NaN;
+      if (!Number.isInteger(index)) throw badRequest("缺少或無效的分片編號 index");
+      const body = new Uint8Array(await c.req.arrayBuffer());
+      const res = await driver.uploadChunk(view(r), index, body);
+      if (r.state !== "uploading") await patchSession(ctx, r.id, { state: "uploading" }, r);
+      return c.json(res);
+    });
+
+    app.get("/api/uploads/:id/chunk", async (c) => {
+      const ctx = c.get("ctx");
+      const r = await loadSession(c);
+      const driver = await ctx.storage.driver(r.storage_id);
+      if (!driver.listChunks) throw badRequest("此儲存不支援分片中繼上傳");
+      return c.json({ chunks: await driver.listChunks(view(r)), partSize: r.part_size, size: r.size });
+    });
 
     app.post("/api/uploads/:id/complete", async (c) => {
       const ctx = c.get("ctx");

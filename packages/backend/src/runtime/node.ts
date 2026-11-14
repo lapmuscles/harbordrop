@@ -35,7 +35,8 @@ export async function startNode() {
   const app = createApp(async () => ctx, staticHandler);
   const port = Number(env.PORT) || 8787;
   const server = serve({ fetch: app.fetch, port, hostname: env.HOST ?? "0.0.0.0" });
-  const timer = setInterval(() => runCron(ctx), 60_000);
+  // 每 60 秒喚醒：runCron 依序呼叫各模組 cron（jobs → cronTick 執行到期排程、tasks → runTasks 推進背景工作）
+  const timer = setInterval(() => void runCron(ctx).catch((e) => console.error("[cron]", e)), 60_000);
   console.log(`HarborDrop 已啟動：http://localhost:${port}（資料：${dataDir}，前端：${staticDir ?? "未建置"}）`);
   return {
     ctx,

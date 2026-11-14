@@ -29,6 +29,7 @@ export default {
     return env.ASSETS.fetch(req as any);
   },
   async scheduled(_ev: ScheduledEvent, env: WorkerEnv, ectx: ExecutionContext) {
+    // Cron Trigger（wrangler.toml [triggers] crons = ["* * * * *"]）：runCron 呼叫 jobs 的 cronTick 與 tasks 的 runTasks
     ectx.waitUntil(getCtx(env).then(runCron));
   },
 };
