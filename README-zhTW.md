@@ -57,7 +57,7 @@ npx wrangler secret put ADMIN_PASSWORD     # ADMIN_USERNAME 在 wrangler.toml [v
 npm run deploy:workers                     # = 建置前端（含 PWA）+ wrangler deploy
 ```
 
-- 資料表在第一次請求時自動建立／遷移；也可手動 `npx wrangler d1 migrations apply harbordrop --remote`。
+- 資料表在第一次請求時自動建立／遷移，**不需要**另外執行 `wrangler d1 migrations apply`。若已經用 wrangler 套用過，程式會讀取 `d1_migrations` 的紀錄、不再重跑；每支遷移也都可安全重跑（已存在的欄位會略過）。反過來，程式自動遷移後再執行 wrangler apply，wrangler 會因欄位已存在而報錯，請勿再手動套用。
 - `wrangler.toml` 已設定 assets（SPA 後備，`/api/*`、`/dav` 先交給 Worker）與每分鐘 Cron（清理過期上傳、執行排程工作、清除過期速率紀錄）。
 - 本機測試：建立 `.dev.vars`（`APP_SECRET=…`、`ADMIN_PASSWORD=…`）後執行 `npx wrangler dev`。
 - **Workers 限制**：單一請求體上限 100 MB（免費／Pro 方案）、記憶體 128 MB。凡是「經後端代理」的上傳都受此限制；本機目錄（local）儲存無法使用。

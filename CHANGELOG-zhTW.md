@@ -1,5 +1,14 @@
 # 變更紀錄
 
+## 1.0.1（2026-11-15）— 修正 D1 遷移重跑
+
+### 修正
+- 先用 `wrangler d1 migrations apply` 套用遷移後，程式內建的自動遷移會再跑一次。0003、0004 裡沒有保護的 `ALTER TABLE … ADD COLUMN` 因此報 `duplicate column name`，每個請求都失敗，`/api/site` 回 500。
+  - 自動遷移會讀取 wrangler 的 `d1_migrations` 紀錄，已套用的遷移不再重跑。
+  - 遷移改為逐句執行，欄位已存在的 ADD COLUMN 直接略過；其他錯誤照常拋出。
+  - 已部署的資料庫不用手動修，重新部署即可。
+- README：說明不需要手動執行 wrangler 遷移。
+
 ## 1.0.0（2026-11-14）— 全功能版
 
 ### 新增

@@ -13,7 +13,7 @@ run_worker_first = ["/api/*", "/dav", "/dav/*"]
 binding = "DB"
 database_name = "harbordrop"
 database_id = "00000000-0000-0000-0000-000000000000" # 改成 `wrangler d1 create harbordrop` 回傳的 ID
-migrations_dir = "packages/backend/src/db/migrations"
+migrations_dir = "packages/backend/src/db/migrations" # 不需手動套用：程式第一次請求時自動遷移（見 README）
 
 # 每分鐘喚醒一次：清理過期上傳工作階段、執行排程工作
 [triggers]
