@@ -24,7 +24,8 @@ async function logout() {
   <nav class="top">
     <div class="container">
       <RouterLink to="/" class="brand">{{ title }}</RouterLink>
-      <RouterLink to="/">{{ t("app.upload") }}</RouterLink>
+      <!-- 根路徑的 inclusive active 會在所有頁面都命中，改用自訂 class 壓掉，只靠 exact-active 高亮 -->
+      <RouterLink to="/" active-class="nav-root-active">{{ t("app.upload") }}</RouterLink>
       <RouterLink to="/files">{{ t("files.nav") }}</RouterLink>
       <RouterLink v-if="allowPaste" to="/paste">{{ t("paste.nav") }}</RouterLink>
       <template v-if="session.me?.kind === 'admin'">
