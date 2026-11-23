@@ -1,4 +1,4 @@
-import { HdApiError, PROTOCOLS, type HdClient, type ProtocolHandler, type UploadHooks } from "@harbordrop/shared/upload";
+import { HdApiError, PROTOCOLS, uploadXetBatch, type HdClient, type ProtocolHandler, type UploadHooks } from "@harbordrop/shared/upload";
 import type { UploadInitResponse } from "@harbordrop/shared";
 
 /**
@@ -58,6 +58,77 @@ export async function fsUpload(api: HdClient, dir: string, file: Blob, filename:
     return { protocol: s.protocol, path: done.entry?.path };
   } catch (e) {
     if (opts.signal?.aborted) await api.abort(s).catch(() => {});
+    throw e;
+  }
+}
+
+export interface FsBatchFile {
+  file: File;
+  /** 在資料夾內的相對路徑（例如 sub/a.jpg） */
+  relativePath: string;
+}
+
+export interface FsBatchInit {
+  sessionId: string;
+  uploadToken: string;
+  protocol: string;
+  client: Record<string, any>;
+  files: { clientPath: string; path: string; filename: string; size: number }[];
+  actionBase: string;
+  completeUrl: string;
+  path: string;
+}
+
+export interface FsBatchOptions extends UploadHooks {
+  /** 額外標頭（例如目錄解鎖的 X-Fs-Token） */
+  headers?: Record<string, string>;
+  onInit?(init: FsBatchInit): void;
+}
+
+/**
+ * 批次上傳：整個資料夾一次 commitIter、後端一次 HF commit。
+ * 儲存不支援批次時，後端回 400 batch_unsupported，呼叫端應退回逐檔上傳。
+ */
+export async function fsUploadBatch(
+  api: HdClient,
+  dir: string,
+  entries: FsBatchFile[],
+  opts: FsBatchOptions = {},
+): Promise<{ protocol: string; entries: { path: string }[] }> {
+  const headers = opts.headers ?? {};
+  const total = entries.reduce((s, e) => s + e.file.size, 0);
+  const init = await api.json<FsBatchInit>(
+    "POST",
+    "/api/fs/upload/init-batch",
+    {
+      path: dir,
+      files: entries.map((e) => ({ relativePath: e.relativePath, size: e.file.size, mime: e.file.type || undefined })),
+    },
+    headers,
+  );
+  opts.onInit?.(init);
+  if (init.protocol !== "xet") throw new Error(`瀏覽器不支援批次上傳協定：${init.protocol}`);
+  // 後端依請求順序回傳檔案清單，以順序對應 clientPath
+  const session: UploadInitResponse = {
+    sessionId: init.sessionId,
+    uploadToken: init.uploadToken,
+    protocol: init.protocol,
+    client: init.client,
+  };
+  const batchEntries = entries.map((e, i) => ({ path: init.files[i].clientPath, file: e.file as Blob }));
+  try {
+    await uploadXetBatch(api, session, batchEntries, opts, String(init.client.resumeScope ?? "xet"));
+    opts.onProgress?.({ phase: "committing", fraction: 1, loaded: total, total });
+    const done = await api.json<{ entries: { path: string }[] }>(
+      "POST",
+      init.completeUrl || "/api/fs/upload/complete",
+      { sessionId: init.sessionId, body: {} },
+      { ...headers, "X-Upload-Token": init.uploadToken },
+    );
+    opts.onProgress?.({ phase: "done", fraction: 1, loaded: total, total });
+    return { protocol: init.protocol, entries: done.entries ?? [] };
+  } catch (e) {
+    if (opts.signal?.aborted) await api.abort(session).catch(() => {});
     throw e;
   }
 }

@@ -1,6 +1,6 @@
 import { reactive } from "vue";
 import { HdApiError, LocalStorageResumeStore, folderDirname, type FolderItem, type ProgressInfo, type UploadHooks } from "@harbordrop/shared/upload";
-import { fsUpload, type ProxyPut } from "./upload";
+import { fsUpload, fsUploadBatch, type FsBatchFile, type ProxyPut } from "./upload";
 import { api } from "../api";
 
 /** 檔案總管前端 API（/api/fs/*）。目錄解鎖權杖存在 sessionStorage，以 X-Fs-Token 或 ?fsToken= 帶上 */
@@ -119,6 +119,33 @@ export async function uploadToDir(dir: string, file: File, hooks: UploadHooks): 
   await fsUpload(api, dir, file, file.name, { ...hooks, headers: tokenHeader(), proxyPut: xhrPut });
 }
 
+/**
+ * 批次上傳整個資料夾到目錄 dir：一次 commit。儲存不支援批次時
+ *（後端回 batch_unsupported），退回逐檔上傳。
+ */
+export async function uploadBatchToDir(dir: string, entries: FsBatchFile[], hooks: UploadHooks): Promise<void> {
+  try {
+    await fsUploadBatch(api, dir, entries, { ...hooks, headers: tokenHeader() });
+  } catch (e: any) {
+    if (e?.code !== "batch_unsupported") throw e;
+    const total = entries.reduce((s, x) => s + x.file.size, 0);
+    let loaded = 0;
+    for (const x of entries) {
+      const relDir = folderDirname(x.relativePath);
+      const targetDir = relDir ? (dir === "/" ? "" : dir) + "/" + relDir : dir;
+      await uploadToDir(targetDir, x.file, {
+        ...hooks,
+        onProgress: (p) => {
+          const cur = p.loaded ?? p.fraction * p.total;
+          hooks.onProgress?.({ phase: p.phase, fraction: total ? (loaded + cur) / total : 1, loaded: loaded + cur, total });
+        },
+      });
+      loaded += x.file.size;
+    }
+    hooks.onProgress?.({ phase: "done", fraction: 1, loaded: total, total });
+  }
+}
+
 // ───────── 上傳佇列 ─────────
 export interface QueueItem {
   id: number;
@@ -128,6 +155,10 @@ export interface QueueItem {
   relativePath?: string;
   /** 完成後要刷新的目錄（文件夾上傳時為最上層目錄，未填 = dir） */
   notifyDir?: string;
+  /** 批次上傳（整個資料夾一次 commit）：整批檔案；有此欄位時 file 只作顯示備援 */
+  batch?: { entries: FsBatchFile[] };
+  /** 佇列顯示名稱（批次上傳用；未填 = relativePath ?? file.name） */
+  label?: string;
   status: "waiting" | "running" | "done" | "error" | "canceled";
   progress: ProgressInfo | null;
   speed: number;
@@ -148,14 +179,31 @@ export function enqueue(dir: string, files: File[]) {
   pump();
 }
 
-/** 文件夾上傳：每檔依相對路徑放入對應子目錄，保留文件夾結構；完成後刷新最上層目錄 */
+/** 文件夾上傳：整批檔案一個佇列項目、一次 commit，保留文件夾結構；完成後刷新最上層目錄 */
 export function enqueueFolder(dir: string, items: FolderItem[]) {
-  for (const it of items) {
-    const relDir = folderDirname(it.relativePath);
-    const targetDir = relDir ? (dir === "/" ? "" : dir) + "/" + relDir : dir;
-    queue.items.push({ id: ++seq, file: it.file as File, dir: targetDir, relativePath: it.relativePath, notifyDir: dir, status: "waiting", progress: null, speed: 0, error: "", retryMsg: "" });
-  }
+  if (!items.length) return;
+  const entries: FsBatchFile[] = items.map((it) => ({ file: it.file as File, relativePath: it.relativePath }));
+  queue.items.push({
+    id: ++seq,
+    file: items[0].file as File,
+    dir,
+    batch: { entries },
+    label: `資料夾上傳（${items.length} 個檔案）`,
+    notifyDir: dir,
+    status: "waiting",
+    progress: null,
+    speed: 0,
+    error: "",
+    retryMsg: "",
+  });
   pump();
+}
+
+/** 拖放上傳：拖入資料夾（相對路徑含子目錄）走一次 commit 的批次；拖入零散檔案走逐檔上傳（一檔一次 commit） */
+export function enqueueDropped(dir: string, items: FolderItem[]) {
+  if (!items.length) return;
+  if (items.some((it) => it.relativePath.includes("/"))) enqueueFolder(dir, items);
+  else enqueue(dir, items.map((it) => it.file as File));
 }
 export function retryItem(it: QueueItem) {
   Object.assign(it, { status: "waiting", error: "", retryMsg: "", progress: null, speed: 0 });
@@ -191,22 +239,24 @@ async function run(it0: QueueItem) {
   it.ctrl = new AbortController();
   let lastT = performance.now();
   let lastB = 0;
+  const hooks: UploadHooks = {
+    signal: it.ctrl.signal,
+    resume: new LocalStorageResumeStore(`hd-fs-resume:${it.dir}`),
+    onProgress: (p) => {
+      it.progress = p;
+      const loaded = p.loaded ?? p.fraction * p.total;
+      const now = performance.now();
+      if (now - lastT >= 500) {
+        it.speed = Math.max(0, ((loaded - lastB) * 1000) / (now - lastT));
+        lastT = now;
+        lastB = loaded;
+      }
+    },
+    onRetry: (r) => (it.retryMsg = `第 ${r.attempt} 次重試（${r.kind}）`),
+  };
   try {
-    await uploadToDir(it.dir, it.file, {
-      signal: it.ctrl.signal,
-      resume: new LocalStorageResumeStore(`hd-fs-resume:${it.dir}`),
-      onProgress: (p) => {
-        it.progress = p;
-        const loaded = p.loaded ?? p.fraction * p.total;
-        const now = performance.now();
-        if (now - lastT >= 500) {
-          it.speed = Math.max(0, ((loaded - lastB) * 1000) / (now - lastT));
-          lastT = now;
-          lastB = loaded;
-        }
-      },
-      onRetry: (r) => (it.retryMsg = `第 ${r.attempt} 次重試（${r.kind}）`),
-    });
+    if (it.batch) await uploadBatchToDir(it.dir, it.batch.entries, hooks);
+    else await uploadToDir(it.dir, it.file, hooks);
     it.status = "done";
     it.speed = 0;
     listeners.forEach((f) => f(it.notifyDir ?? it.dir));

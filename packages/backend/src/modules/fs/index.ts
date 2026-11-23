@@ -6,6 +6,7 @@ import { badRequest, conflict, forbidden, HttpError, notFound, unauthorized } fr
 import { contentDisposition, guessMime, joinPath } from "../../storage/util";
 import type { FileEntry, StorageDriver, UploadSessionView } from "../../storage/types";
 import { createShare, prepareShareOptions, shareInfo } from "../shares/service";
+import { sanitizeRelativePath } from "../uploads/index";
 import { assertUnlocked, effectiveMeta, isHidden, isHiddenPath } from "../fsmeta/service";
 import { createTask } from "../tasks/service";
 import { basename, dirname, loadMounts, resolveIn, virtualChildren, vnorm, type MountRow, type Resolved } from "./mounts";
@@ -69,6 +70,31 @@ function need<K extends keyof StorageDriver>(d: StorageDriver, k: K, label: stri
   const f = d[k];
   if (typeof f !== "function") throw badRequest(`此儲存不支援${label}`, "unsupported");
   return (f as Function).bind(d) as NonNullable<StorageDriver[K]>;
+}
+
+/**
+ * 批次 clientPath 去重：驅動的 initUpload 只用檔名算 clientPath，同名檔案跨子目錄
+ *（如 sub1/a.jpg 與 sub2/a.jpg）會撞成同一個值；後端 commit 以 clientPath 核對，
+ * 重複就整批拒絕。後來的撞名檔在副檔名前加 -2、-3……直到唯一；repoPath 與
+ * vpath 不動（寫入位置不變），clientPath 只是假倉庫裡的識別用路徑。
+ */
+export function dedupeBatchClientPaths(files: { clientPath: string }[]): void {
+  const used = new Set<string>();
+  for (const f of files) {
+    let cp = f.clientPath;
+    if (used.has(cp)) {
+      const dot = cp.lastIndexOf(".");
+      let n = 2;
+      let cand: string;
+      do {
+        cand = dot > 0 ? `${cp.slice(0, dot)}-${n}${cp.slice(dot)}` : `${cp}-${n}`;
+        n++;
+      } while (used.has(cand));
+      cp = cand;
+    }
+    used.add(cp);
+    f.clientPath = cp;
+  }
 }
 
 const entryOut = (e: FileEntry, vpath: string, extra: Record<string, unknown> = {}) => ({
@@ -368,6 +394,58 @@ export const fsModule: HdModule = {
       return c.json({ sessionId: id, uploadToken: token, protocol: init.protocol, client: init.client, partSize: init.partSize, actionBase: `/api/uploads/${id}/action`, completeUrl: "/api/fs/upload/complete", path: vpath }, 201);
     });
 
+    // ── 批次上傳（整個資料夾一次提交）──
+    // 一個工作階段含多個檔案，瀏覽器跑一次 commitIter（多個操作），後端只送一個 HF commit。
+    // HF 對同一倉庫每小時最多 128 次 commit，逐檔提交幾百個小檔一定會被限流（429）。
+    // 目前只有 xet 協定支援批次；其他協定回 batch_unsupported，前端退回逐檔上傳。
+    app.post("/api/fs/upload/init-batch", async (c) => {
+      const ctx = c.get("ctx");
+      const b = await c.req.json<any>();
+      const list = b.files;
+      if (!Array.isArray(list) || !list.length) throw badRequest("缺少檔案清單");
+      if (list.length > 1000) throw badRequest("一次最多上傳 1000 個檔案", "too_many_files");
+      const t = await target(c, b.path ?? "/", "fs.write");
+      if (!t.driver.initUpload) throw badRequest("此儲存不支援批次上傳", "batch_unsupported");
+      const files: { clientPath: string; repoPath: string; rel: string; filename: string; vpath: string; size: number }[] = [];
+      let total = 0;
+      let firstClient: Record<string, any> | undefined;
+      for (const item of list) {
+        const size = Number(item.size);
+        if (!Number.isFinite(size) || size < 0) throw badRequest("缺少檔案大小");
+        const segs = sanitizeRelativePath(String(item.relativePath ?? item.filename ?? ""));
+        if (!segs.length) throw badRequest("缺少檔案路徑");
+        const filename = segs[segs.length - 1];
+        const rel = joinPath(t.r.rel, ...segs);
+        const vpath = joinPath(t.vpath, ...segs);
+        const mime = item.mime || guessMime(filename);
+        const init = await t.driver.initUpload({ path: rel, filename, size, mime });
+        if (init.protocol !== "xet") throw badRequest("此儲存不支援批次上傳", "batch_unsupported");
+        if (!firstClient) firstClient = init.client as Record<string, any>;
+        files.push({ clientPath: (init.meta as any)?.clientPath, repoPath: (init.meta as any)?.repoPath, rel, filename, vpath, size });
+        total += size;
+      }
+      dedupeBatchClientPaths(files);
+      const id = randomId(16);
+      const token = randomToken(24);
+      const now = Date.now();
+      await ctx.db.run(
+        `INSERT INTO upload_sessions (id, token_hash, storage_id, protocol, object_path, filename, size, mime, state, provider_upload_id, part_size, meta, share_options, created_by, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, 'xet', ?, ?, ?, '', 'init', NULL, NULL, ?, ?, ?, ?, ?, ?)`,
+        [id, await sha256Hex(token), t.r.storageId, t.r.rel, basename(t.r.rel) || "batch", total, JSON.stringify({ batch: true, files }), JSON.stringify({ fs: true, vpath: t.vpath, batch: true }), principalId(c.get("principal")), now, now, now + 24 * 3600_000],
+      );
+      const { path: _omit, ...client } = firstClient ?? {};
+      return c.json({
+        sessionId: id,
+        uploadToken: token,
+        protocol: "xet",
+        client,
+        files: files.map((f) => ({ clientPath: f.clientPath, path: f.vpath, filename: f.filename, size: f.size })),
+        actionBase: `/api/uploads/${id}/action`,
+        completeUrl: "/api/fs/upload/complete",
+        path: t.vpath,
+      }, 201);
+    });
+
     app.post("/api/fs/upload/complete", async (c) => {
       const ctx = c.get("ctx");
       const b = await c.req.json<any>().catch(() => ({}));
@@ -379,6 +457,20 @@ export const fsModule: HdModule = {
       if (!opts.fs) throw badRequest("此工作階段不是檔案管理上傳，請改用 /api/uploads/:id/complete");
       if (r.state === "completed" || r.state === "aborted") throw badRequest("工作階段已結束");
       const driver = await ctx.storage.driver(r.storage_id);
+      const meta = JSON.parse(r.meta || "{}");
+      if (Array.isArray(meta.files) && meta.files.length) {
+        // 批次：整批檔案一次驗證，回傳所有檔案的 entry
+        const { entries } = await need(driver, "completeBatchUpload", "批次上傳完成")(sessionView(r));
+        await ctx.db.run("UPDATE upload_sessions SET state = 'completed', updated_at = ? WHERE id = ?", [Date.now(), r.id]);
+        const byRel = new Map(meta.files.map((f: any) => [f.rel, f]));
+        return c.json({
+          ok: true,
+          entries: entries.map((e: FileEntry) => {
+            const f = byRel.get(e.path) as any;
+            return entryOut({ ...e, name: f?.filename ?? e.name }, f?.vpath ?? e.path);
+          }),
+        });
+      }
       const { entry } = await need(driver, "completeUpload", "瀏覽器直傳")(sessionView(r), b.body ?? {});
       await ctx.db.run("UPDATE upload_sessions SET state = 'completed', sha256 = ?, updated_at = ? WHERE id = ?", [entry.sha256 ?? null, Date.now(), r.id]);
       return c.json({ ok: true, entry: entryOut({ ...entry, name: r.filename }, opts.vpath) });
