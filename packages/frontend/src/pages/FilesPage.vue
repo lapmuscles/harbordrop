@@ -6,7 +6,7 @@ import { HdApiError } from "@harbordrop/shared/upload";
 import { session } from "../api";
 import { t, formatBytes, formatTime } from "../i18n";
 import { previewComponent, MarkdownPreview } from "../previews";
-import { fs, downloadUrl, enqueue, enqueueFolder, queue, retryItem, cancelItem, clearFinished, onUploaded, isPasswordError, type FsEntry, type FsListResponse } from "../fs/client";
+import { fs, downloadUrl, enqueue, enqueueFolder, queue, retryItem, retryAllFailed, cancelItem, clearFinished, onUploaded, isPasswordError, type FsEntry, type FsListResponse } from "../fs/client";
 import { collectFolderFiles, filesFromDataTransfer } from "../folder";
 
 const route = useRoute();
@@ -230,6 +230,7 @@ function onPickFolder(e: Event) {
   input.value = "";
 }
 const qVisible = computed(() => queue.items.length > 0);
+const failedCount = computed(() => queue.items.filter((i) => i.status === "error").length);
 const pct = (f?: number) => `${Math.round((f ?? 0) * 100)}%`;
 
 let off: (() => void) | undefined;
@@ -378,6 +379,7 @@ const icon = (e: FsEntry) => (e.isDir ? (e.mount ? "🗄️" : "📁") : ({ imag
   <div v-if="qVisible" class="card queue">
     <div class="row">
       <strong class="grow">{{ t("files.queue") }}</strong>
+      <button v-if="failedCount" class="ghost mini" @click="retryAllFailed">{{ t("files.retryAll", { n: failedCount }) }}</button>
       <button class="ghost mini" @click="clearFinished">{{ t("files.clearDone") }}</button>
     </div>
     <div v-for="it in queue.items" :key="it.id" class="qitem">
