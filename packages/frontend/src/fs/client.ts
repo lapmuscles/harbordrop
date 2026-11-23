@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import { HdApiError, LocalStorageResumeStore, type ProgressInfo, type UploadHooks } from "@harbordrop/shared/upload";
+import { HdApiError, LocalStorageResumeStore, folderDirname, type FolderItem, type ProgressInfo, type UploadHooks } from "@harbordrop/shared/upload";
 import { fsUpload, type ProxyPut } from "./upload";
 import { api } from "../api";
 
@@ -124,6 +124,10 @@ export interface QueueItem {
   id: number;
   file: File;
   dir: string;
+  /** 文件夾上傳時，該檔在文件夾內的相對路徑（顯示用） */
+  relativePath?: string;
+  /** 完成後要刷新的目錄（文件夾上傳時為最上層目錄，未填 = dir） */
+  notifyDir?: string;
   status: "waiting" | "running" | "done" | "error" | "canceled";
   progress: ProgressInfo | null;
   speed: number;
@@ -141,6 +145,16 @@ export function onUploaded(fn: (dir: string) => void) {
 
 export function enqueue(dir: string, files: File[]) {
   for (const file of files) queue.items.push({ id: ++seq, file, dir, status: "waiting", progress: null, speed: 0, error: "", retryMsg: "" });
+  pump();
+}
+
+/** 文件夾上傳：每檔依相對路徑放入對應子目錄，保留文件夾結構；完成後刷新最上層目錄 */
+export function enqueueFolder(dir: string, items: FolderItem[]) {
+  for (const it of items) {
+    const relDir = folderDirname(it.relativePath);
+    const targetDir = relDir ? (dir === "/" ? "" : dir) + "/" + relDir : dir;
+    queue.items.push({ id: ++seq, file: it.file as File, dir: targetDir, relativePath: it.relativePath, notifyDir: dir, status: "waiting", progress: null, speed: 0, error: "", retryMsg: "" });
+  }
   pump();
 }
 export function retryItem(it: QueueItem) {
@@ -185,7 +199,7 @@ async function run(it0: QueueItem) {
     });
     it.status = "done";
     it.speed = 0;
-    listeners.forEach((f) => f(it.dir));
+    listeners.forEach((f) => f(it.notifyDir ?? it.dir));
   } catch (e: any) {
     it.status = it.ctrl.signal.aborted ? "canceled" : "error";
     it.error = it.status === "canceled" ? "" : e?.message ?? String(e);
