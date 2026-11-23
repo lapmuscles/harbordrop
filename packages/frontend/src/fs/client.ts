@@ -175,8 +175,9 @@ export function cancelItem(it: QueueItem) {
   if (it.status === "running") it.ctrl?.abort();
   else if (it.status === "waiting") it.status = "canceled";
 }
+/** 清除已完成：只移除已成功（done）的項目；失敗（error）與已取消的保留以便重試，等待中／進行中的也不動 */
 export function clearFinished() {
-  queue.items = queue.items.filter((i) => i.status === "waiting" || i.status === "running");
+  queue.items = queue.items.filter((i) => i.status !== "done");
 }
 
 function pump() {
