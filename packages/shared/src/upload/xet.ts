@@ -35,7 +35,11 @@ export async function uploadXet(
       const headers = new Headers(init.headers);
       headers.set("X-Upload-Token", session.uploadToken);
       const req = { ...init, headers, credentials: "include" as RequestCredentials };
-      if (/\/commit\/[^/]+$/.test(url)) return base(url, req); // commit 不自動重試，避免重複提交
+      // commit：可重試狀態碼（408/429/5xx）代表 HF 在建立提交前就拒絕了，重試不會重複提交；
+      // 大量小檔案連續提交時 HF 容易限流，指數退避重試可把成功率拉回來。不可重試的狀態
+      //（如 400/403/404）直接回傳，由 commitIter 丟出可讀錯誤。
+      if (/\/commit\/[^/]+$/.test(url))
+        return retryingFetch(base, url, req, { kind: "control", id: "commit", index: ctrlIndex++ }, hooks, stats);
       return retryingFetch(base, url, req, { kind: "control", id: url.slice(sessionPrefix.length), index: ctrlIndex++ }, hooks, stats);
     }
     // 2) xorb 上傳：逐一重試＋續傳略過
