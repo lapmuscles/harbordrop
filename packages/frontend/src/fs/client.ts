@@ -161,6 +161,16 @@ export function retryItem(it: QueueItem) {
   Object.assign(it, { status: "waiting", error: "", retryMsg: "", progress: null, speed: 0 });
   pump();
 }
+/** 全部重試：只把失敗（error）的項目放回等待佇列，成功／等待中／進行中／已取消的不動；沿用既有 pump 並行控制。重試後又失敗的項目可再全部重試 */
+export function retryAllFailed() {
+  let n = 0;
+  for (const it of queue.items) {
+    if (it.status !== "error") continue;
+    Object.assign(it, { status: "waiting", error: "", retryMsg: "", progress: null, speed: 0 });
+    n++;
+  }
+  if (n) pump();
+}
 export function cancelItem(it: QueueItem) {
   if (it.status === "running") it.ctrl?.abort();
   else if (it.status === "waiting") it.status = "canceled";

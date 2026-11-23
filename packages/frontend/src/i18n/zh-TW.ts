@@ -163,6 +163,7 @@ export default {
     queue: "上傳佇列",
     clearDone: "清除已完成",
     retry: "重試",
+    retryAll: "全部重試（{n}）",
     status: { waiting: "等待中", running: "上傳中", done: "完成", error: "失敗", canceled: "已取消" },
     speed: "{v}/秒",
     needLogin: "未開放匿名瀏覽，請先登入。",
