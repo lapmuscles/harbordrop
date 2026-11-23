@@ -31,6 +31,7 @@ describe("onedrive 驅動", () => {
       if (r) return r;
       if (c.url === `${G}/root:/HD/2026/a.bin:/createUploadSession`) return Response.json({ uploadUrl: "https://up.onedrive/sess", expirationDateTime: "2030-01-01T00:00:00Z" });
       if (c.url === `${G}/root:/HD/2026/a.bin:`) return Response.json({ id: "I", name: "a.bin", size: 10, file: { mimeType: "application/octet-stream" }, "@microsoft.graph.downloadUrl": "https://dl.onedrive/x" });
+      if (c.method === "POST" && c.url.endsWith("/children")) return new Response(JSON.stringify({ id: "DIR", folder: {} }), { status: 201 });
       if (c.url.startsWith(`${G}/root:/HD/dir:/children`)) return Response.json({ value: [{ name: "f.txt", size: 3, file: {} }, { name: "sub", folder: {} }], "@odata.nextLink": `https://graph.microsoft.com/v1.0/next?x=1` });
       if (c.url === G) return Response.json({ id: "DRIVE", driveType: "personal", quota: { used: 1, total: 2 } });
       return new Response(JSON.stringify({ error: { message: "nf" } }), { status: 404 });
@@ -89,6 +90,30 @@ describe("onedrive 驅動", () => {
     expect(s).not.toContain(REFRESH);
     expect(s).not.toContain("AT");
     expect(calls.find((c) => c.url.endsWith("createUploadSession"))!.method).toBe("POST");
+  });
+
+  it("initUpload 巢狀路徑：先逐層建好父資料夾再建立上傳工作階段", async () => {
+    // 狀態式 mock：父目錄不存在時建子目錄回 404，存在回 201
+    const existing = new Set(["/", "/HD"]);
+    const { d, calls } = make({}, (c) => {
+      if (c.url === `${G}/root:/HD/2026/sub/deep/f.bin:/createUploadSession`) return Response.json({ uploadUrl: "https://up.onedrive/sess2" });
+      if (c.method === "POST" && c.url.endsWith("/children")) {
+        const parent = c.url === `${G}/root/children` ? "/" : decodeURIComponent(c.url.slice(`${G}/root:`.length, -":/children".length));
+        if (!existing.has(parent)) return new Response(JSON.stringify({ error: { message: "nf" } }), { status: 404 });
+        existing.add(parent === "/" ? `/${JSON.parse(c.body).name}` : `${parent}/${JSON.parse(c.body).name}`);
+        return new Response(JSON.stringify({ id: "DIR", folder: {} }), { status: 201 });
+      }
+      return undefined;
+    });
+    const r = await d.initUpload({ path: "/2026/sub/deep/f.bin", filename: "f.bin", size: 100, mime: "application/octet-stream" });
+    expect(r.client.uploadUrl).toBe("https://up.onedrive/sess2");
+    const created = calls.filter((c) => c.method === "POST" && c.url.endsWith("/children") && c.url !== `${G}/root/children`);
+    // 2026、sub、deep 依序建好（中間兩次 404 觸發向上遞迴）
+    expect(created.filter((c) => JSON.parse(c.body).name === "2026")).toHaveLength(1);
+    expect(created.filter((c) => JSON.parse(c.body).name === "sub")).toHaveLength(2); // 第一次 404、重試 201
+    expect(created.filter((c) => JSON.parse(c.body).name === "deep")).toHaveLength(2);
+    const sessIdx = calls.findIndex((c) => c.url.endsWith("createUploadSession"));
+    expect(sessIdx).toBeGreaterThan(calls.indexOf(created.at(-1)!));
   });
 
   it("completeUpload 驗證大小；abortUpload 刪除工作階段", async () => {

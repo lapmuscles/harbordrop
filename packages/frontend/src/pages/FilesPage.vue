@@ -6,7 +6,8 @@ import { HdApiError } from "@harbordrop/shared/upload";
 import { session } from "../api";
 import { t, formatBytes, formatTime } from "../i18n";
 import { previewComponent, MarkdownPreview } from "../previews";
-import { fs, downloadUrl, enqueue, queue, retryItem, cancelItem, clearFinished, onUploaded, isPasswordError, type FsEntry, type FsListResponse } from "../fs/client";
+import { fs, downloadUrl, enqueue, enqueueFolder, queue, retryItem, cancelItem, clearFinished, onUploaded, isPasswordError, type FsEntry, type FsListResponse } from "../fs/client";
+import { collectFolderFiles, filesFromDataTransfer } from "../folder";
 
 const route = useRoute();
 const router = useRouter();
@@ -200,6 +201,7 @@ function doDownload() {
 const over = ref(false);
 let dragDepth = 0;
 const fileInput = ref<HTMLInputElement | null>(null);
+const folderInput = ref<HTMLInputElement | null>(null);
 function onDragEnter(e: DragEvent) {
   if (!e.dataTransfer?.types.includes("Files")) return;
   dragDepth++;
@@ -208,16 +210,23 @@ function onDragEnter(e: DragEvent) {
 function onDragLeave() {
   if (--dragDepth <= 0) (dragDepth = 0), (over.value = false);
 }
-function onDrop(e: DragEvent) {
+async function onDrop(e: DragEvent) {
   dragDepth = 0;
   over.value = false;
-  const files = [...(e.dataTransfer?.files ?? [])];
-  if (files.length && canWrite.value) enqueue(vpath.value, files);
+  if (!canWrite.value || !e.dataTransfer) return;
+  const items = await filesFromDataTransfer(e.dataTransfer);
+  if (items.length) enqueueFolder(vpath.value, items);
 }
 function onPick(e: Event) {
   const input = e.target as HTMLInputElement;
   const files = [...(input.files ?? [])];
   if (files.length) enqueue(vpath.value, files);
+  input.value = "";
+}
+function onPickFolder(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const items = collectFolderFiles(input.files ?? []);
+  if (items.length) enqueueFolder(vpath.value, items);
   input.value = "";
 }
 const qVisible = computed(() => queue.items.length > 0);
@@ -250,6 +259,8 @@ const icon = (e: FsEntry) => (e.isDir ? (e.mount ? "🗄️" : "📁") : ({ imag
     <div class="row toolbar">
       <button v-if="canWrite" @click="fileInput?.click()">{{ t("files.upload") }}</button>
       <input ref="fileInput" type="file" multiple hidden @change="onPick" />
+      <button v-if="canWrite" class="ghost" @click="folderInput?.click()">{{ t("files.uploadFolder") }}</button>
+      <input ref="folderInput" type="file" webkitdirectory hidden @change="onPickFolder" />
       <button v-if="canWrite" class="ghost" @click="doMkdir">{{ t("files.mkdir") }}</button>
       <span v-if="selection.length" class="muted">{{ t("files.selected", { n: selection.length }) }}</span>
       <button v-if="selection.length" class="ghost" @click.stop="openMenu($event)">{{ t("files.actions") }} ▾</button>
@@ -371,7 +382,7 @@ const icon = (e: FsEntry) => (e.isDir ? (e.mount ? "🗄️" : "📁") : ({ imag
     </div>
     <div v-for="it in queue.items" :key="it.id" class="qitem">
       <div class="row">
-        <span class="grow nm">{{ it.file.name }}</span>
+        <span class="grow nm" :title="it.relativePath ?? it.file.name">{{ it.relativePath ?? it.file.name }}</span>
         <span class="muted">{{ t(`files.status.${it.status}`) }}</span>
         <span v-if="it.status === 'running' && it.speed" class="muted">{{ t("files.speed", { v: formatBytes(it.speed) }) }}</span>
         <button v-if="it.status === 'error' || it.status === 'canceled'" class="ghost mini" @click="retryItem(it)">{{ t("files.retry") }}</button>

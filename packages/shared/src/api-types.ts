@@ -32,6 +32,16 @@ export interface UploadInitRequest {
   size: number;
   mime?: string;
   share?: ShareOptionsInput;
+  /**
+   * 文件夾內的相對路徑（例如 `photos/sub/a.jpg`，第一段為最上層文件夾名）。
+   * 後端只取目錄部分併入儲存路徑，檔名仍以 `filename` 為準；未填 = 單一檔案。
+   */
+  relativePath?: string;
+  /**
+   * 同一批上傳共用的隨機段（例如整個文件夾），取代路徑範本的 `{rand}`，
+   * 讓同批檔案落在同一目錄；英數字、`-`、`_`，1–32 字元。未填 = 後端隨機產生。
+   */
+  groupId?: string;
 }
 
 export interface UploadInitResponse {

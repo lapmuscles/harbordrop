@@ -15,9 +15,10 @@ harbordrop/
 │  │        ├─ api.ts         HdClient：呼叫後端 API
 │  │        ├─ common.ts      retryingFetch、ResumeStore、統計、故障注入
 │  │        ├─ retry.ts       指數退避
+│  │        ├─ folder.ts      文件夾上傳純函式（collectFolderFiles、newFolderGroupId）
 │  │        ├─ xet.ts         HuggingFace Xet（@huggingface/hub commitIter + 後端 hub 代理）
 │  │        ├─ s3.ts          S3 multipart（預簽章分片）
-│  │        └─ index.ts       PROTOCOLS 協定表、uploadFile() 完整流程
+│  │        └─ index.ts       PROTOCOLS 協定表、uploadFile() 完整流程、uploadFolder() 文件夾流程
 │  ├─ backend/
 │  │  └─ src/
 │  │     ├─ app.ts            createApp()：與平台無關的 Hono 應用、錯誤處理、身分解析、runCron()

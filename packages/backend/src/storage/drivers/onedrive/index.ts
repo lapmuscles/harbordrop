@@ -302,6 +302,9 @@ export class OneDriveDriver implements StorageDriver {
 
   async initUpload(input: UploadInitInput): Promise<UploadInitResult> {
     const full = this.full(input.path);
+    // 上傳路徑的父資料夾可能不存在（例如分享範本的日期目錄、文件夾上傳的子目錄）：
+    // 先逐層建好，否則 createUploadSession 會因父目錄不存在而失敗；已存在時 409 直接略過
+    await this.mkdirFull(this.parent(full));
     if (input.size === 0) {
       // 上傳工作階段不接受 0 位元組：後端直接建立空檔
       await this.put(input.path, new Uint8Array(0), { size: 0, mime: input.mime });

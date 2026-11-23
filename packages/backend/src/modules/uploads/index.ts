@@ -4,7 +4,7 @@ import type { AppContext, HdContext } from "../../core/context";
 import { can, principalId } from "../../core/auth";
 import { randomId, randomToken, sha256Hex, timingSafeEqual } from "../../core/crypto";
 import { badRequest, forbidden, HttpError, notFound } from "../../core/errors";
-import { guessMime, normalizePath } from "../../storage/util";
+import { guessMime, joinPath, normalizePath } from "../../storage/util";
 import type { UploadSessionView } from "../../storage/types";
 import { createShare, prepareShareOptions, shareInfo } from "../shares/service";
 import type { UploadInitRequest, UploadInitResponse, UploadCompleteResponse } from "@harbordrop/shared";
@@ -62,15 +62,44 @@ export function sanitizeFilename(name: string): string {
   return s || "file";
 }
 
-export function renderUploadPath(template: string, filename: string, now = new Date()): string {
+export function renderUploadPath(template: string, filename: string, now = new Date(), rand = randomId(8)): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   const p = template
     .replace("{yyyy}", String(now.getUTCFullYear()))
     .replace("{mm}", pad(now.getUTCMonth() + 1))
     .replace("{dd}", pad(now.getUTCDate()))
-    .replace("{rand}", randomId(8))
+    .replace("{rand}", rand)
     .replace("{name}", filename);
   return normalizePath(p.includes(filename) ? p : `${p}/${filename}`);
+}
+
+const GROUP_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
+
+/** 同一批上傳共用的隨機段（例如整個文件夾）：取代路徑範本的 {rand}，讓同批檔案落在同一目錄 */
+export function validateGroupId(v: unknown): string | undefined {
+  if (v === undefined || v === null || v === "") return undefined;
+  const s = String(v);
+  if (!GROUP_ID_RE.test(s)) throw badRequest("groupId 只能使用英數字、- 和 _，長度 1–32", "invalid_group_id");
+  return s;
+}
+
+/**
+ * 文件夾相對路徑清理：逐段套用 sanitizeFilename；拒絕 `..`；最多 20 段、總長 500 字元。
+ * 回傳清理後的段落（含最後的檔名段）；呼叫端只取目錄部分，檔名仍以 filename 參數為準。
+ */
+export function sanitizeRelativePath(p: string): string[] {
+  const raw = String(p ?? "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((s) => s !== "" && s !== ".");
+  if (!raw.length) return [];
+  if (raw.length > 20) throw badRequest("相對路徑太深（最多 20 層）", "invalid_relative_path");
+  const segs = raw.map((s) => {
+    if (s === "..") throw badRequest("相對路徑不可包含 ..", "invalid_relative_path");
+    return sanitizeFilename(s);
+  });
+  if (segs.join("/").length > 500) throw badRequest("相對路徑太長", "invalid_relative_path");
+  return segs;
 }
 
 async function loadSession(c: HdContext): Promise<SessionRow> {
@@ -117,7 +146,15 @@ export const uploadsModule: HdModule = {
       const driver = await ctx.storage.driverFor(row);
       if (!driver.initUpload) throw badRequest("此儲存不支援瀏覽器直傳");
       const filename = sanitizeFilename(b.filename);
-      const objectPath = renderUploadPath(String(await ctx.settings.get("uploadPathTemplate")), filename);
+      const relSegs = b.relativePath ? sanitizeRelativePath(b.relativePath) : [];
+      // 相對路徑的目錄部分併入儲存路徑（檔名段以 filename 為準）；同批檔案共用 groupId 落在同一目錄
+      const relDir = relSegs.length > 1 ? relSegs.slice(0, -1).join("/") : "";
+      const groupId = validateGroupId(b.groupId);
+      let objectPath = renderUploadPath(String(await ctx.settings.get("uploadPathTemplate")), filename, new Date(), groupId);
+      if (relDir) {
+        const base = objectPath.slice(0, objectPath.lastIndexOf("/")) || "/";
+        objectPath = joinPath(base, relDir, filename);
+      }
       const shareOpts = await prepareShareOptions(ctx, b.share, { anonymous });
       const mime = b.mime || guessMime(filename);
       const init = await driver.initUpload({ path: objectPath, filename, size: b.size, mime, origin: c.req.header("origin") ?? origin(c) });
