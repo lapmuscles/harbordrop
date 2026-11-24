@@ -70,3 +70,33 @@ describe("檔案總管上傳佇列：全部重試", () => {
     expect(c.queue.items.map((i) => i.status)).toEqual(["waiting", "error"]);
   });
 });
+
+describe("檔案總管上傳佇列：清除已完成", () => {
+  beforeAll(async () => {
+    c = await import("../src/fs/client");
+  });
+  beforeEach(() => {
+    c.queue.items = [];
+    c.queue.concurrency = 0;
+  });
+
+  it("只清除已成功（done）的項目，失敗的保留以便重試，等待中／進行中／已取消的不動", () => {
+    c.queue.items = [mkItem(1, "done"), mkItem(2, "error"), mkItem(3, "waiting"), mkItem(4, "canceled"), mkItem(5, "done")];
+    c.clearFinished();
+    expect(c.queue.items.map((i) => i.status)).toEqual(["error", "waiting", "canceled"]);
+    // 失敗項目的錯誤訊息保留，重試按鈕還在
+    expect(c.queue.items[0].error).toBe("boom");
+  });
+
+  it("只剩已成功項目時佇列清空", () => {
+    c.queue.items = [mkItem(1, "done"), mkItem(2, "done")];
+    c.clearFinished();
+    expect(c.queue.items).toEqual([]);
+  });
+
+  it("沒有已成功項目時不做任何事", () => {
+    c.queue.items = [mkItem(1, "error"), mkItem(2, "waiting")];
+    c.clearFinished();
+    expect(c.queue.items.map((i) => i.status)).toEqual(["error", "waiting"]);
+  });
+});
