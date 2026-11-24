@@ -4,6 +4,28 @@ import { memFiles, memFsStores, memfsDriver } from "./helpers/memory-driver";
 import { DRIVERS } from "../src/storage/registry";
 import type { DriverDefinition } from "../src/storage/types";
 import { renderUploadPath, sanitizeRelativePath, validateGroupId } from "../src/modules/uploads";
+import { dedupeBatchClientPaths } from "../src/modules/fs";
+
+/** 批次 clientPath 去重：同名跨子目錄不撞，後綴不與既有檔名撞 */
+describe("dedupeBatchClientPaths", () => {
+  const names = (xs: string[]) => {
+    const files = xs.map((clientPath) => ({ clientPath }));
+    dedupeBatchClientPaths(files);
+    return files.map((f) => f.clientPath);
+  };
+  it("同名檔加 -2、-3 後綴", () => {
+    expect(names(["a.jpg", "a.jpg", "a.jpg"])).toEqual(["a.jpg", "a-2.jpg", "a-3.jpg"]);
+  });
+  it("後綴不與既有同名檔撞", () => {
+    expect(names(["a.jpg", "a-2.jpg", "a.jpg"])).toEqual(["a.jpg", "a-2.jpg", "a-3.jpg"]);
+  });
+  it("無副檔名加在尾端", () => {
+    expect(names(["README", "README"])).toEqual(["README", "README-2"]);
+  });
+  it("沒有重複時不動", () => {
+    expect(names(["a.jpg", "b.jpg"])).toEqual(["a.jpg", "b.jpg"]);
+  });
+});
 
 /** 只能經後端 put 的版本（無 initUpload）→ fs/upload/init 回 protocol=proxy */
 const memproxyDriver: DriverDefinition = {
@@ -133,5 +155,21 @@ describe("檔案總管的巢狀目錄上傳（文件夾上傳的後端路徑）"
     expect(put.status).toBe(201);
     const list = await h.call("GET", "/api/fs/list?path=/p/photos", undefined, h.auth);
     expect(list.json.entries.map((e: any) => e.name)).toEqual(["c.txt"]);
+  });
+
+  it("init-batch：非 xet 儲存回 batch_unsupported（前端退回逐檔上傳）", async () => {
+    const h = await setup();
+    const r = await h.call("POST", "/api/fs/upload/init-batch", { path: "/a/photos", files: [{ relativePath: "a.txt", size: 1 }, { relativePath: "sub/b.txt", size: 2 }] }, h.auth);
+    expect(r.status).toBe(400);
+    expect(r.json.error?.code).toBe("batch_unsupported");
+  });
+
+  it("init-batch：空清單與超過上限回 400", async () => {
+    const h = await setup();
+    const empty = await h.call("POST", "/api/fs/upload/init-batch", { path: "/a/photos", files: [] }, h.auth);
+    expect(empty.status).toBe(400);
+    const tooMany = await h.call("POST", "/api/fs/upload/init-batch", { path: "/a/photos", files: Array.from({ length: 1001 }, (_, i) => ({ relativePath: `f${i}.txt`, size: 1 })) }, h.auth);
+    expect(tooMany.status).toBe(400);
+    expect(tooMany.json.error?.code).toBe("too_many_files");
   });
 });

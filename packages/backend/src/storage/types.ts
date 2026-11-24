@@ -145,6 +145,8 @@ export interface StorageDriver {
   initUpload?(input: UploadInitInput): Promise<UploadInitResult>;
   uploadAction?(session: UploadSessionView, action: string, input: UploadActionInput): Promise<UploadActionResult>;
   completeUpload?(session: UploadSessionView, body: any): Promise<{ entry: FileEntry; meta?: Record<string, unknown> }>;
+  /** 批次上傳完成：驗證整批檔案並回傳所有檔案的 entry（僅 xet 等支援批次的驅動提供） */
+  completeBatchUpload?(session: UploadSessionView): Promise<{ entries: FileEntry[] }>;
   abortUpload?(session: UploadSessionView): Promise<void>;
 
   // —— 分片中繼（chunk-relay）：每片經後端轉送到渠道 ——

@@ -6,7 +6,7 @@ import { HdApiError } from "@harbordrop/shared/upload";
 import { session } from "../api";
 import { t, formatBytes, formatTime } from "../i18n";
 import { previewComponent, MarkdownPreview } from "../previews";
-import { fs, downloadUrl, enqueue, enqueueFolder, queue, retryItem, retryAllFailed, cancelItem, clearFinished, onUploaded, isPasswordError, type FsEntry, type FsListResponse } from "../fs/client";
+import { fs, downloadUrl, enqueue, enqueueDropped, enqueueFolder, queue, retryItem, retryAllFailed, cancelItem, clearFinished, onUploaded, isPasswordError, type FsEntry, type FsListResponse } from "../fs/client";
 import { collectFolderFiles, filesFromDataTransfer } from "../folder";
 
 const route = useRoute();
@@ -215,7 +215,7 @@ async function onDrop(e: DragEvent) {
   over.value = false;
   if (!canWrite.value || !e.dataTransfer) return;
   const items = await filesFromDataTransfer(e.dataTransfer);
-  if (items.length) enqueueFolder(vpath.value, items);
+  if (items.length) enqueueDropped(vpath.value, items);
 }
 function onPick(e: Event) {
   const input = e.target as HTMLInputElement;
@@ -391,7 +391,7 @@ const thumbSrc = (e: FsEntry) => downloadUrl(e.path, true);
     </div>
     <div v-for="it in queue.items" :key="it.id" class="qitem">
       <div class="row">
-        <span class="grow nm" :title="it.relativePath ?? it.file.name">{{ it.relativePath ?? it.file.name }}</span>
+        <span class="grow nm" :title="it.label ?? it.relativePath ?? it.file.name">{{ it.label ?? it.relativePath ?? it.file.name }}</span>
         <span class="muted">{{ t(`files.status.${it.status}`) }}</span>
         <span v-if="it.status === 'running' && it.speed" class="muted">{{ t("files.speed", { v: formatBytes(it.speed) }) }}</span>
         <button v-if="it.status === 'error' || it.status === 'canceled'" class="ghost mini" @click="retryItem(it)">{{ t("files.retry") }}</button>

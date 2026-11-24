@@ -12,7 +12,7 @@ export * from "./api";
 export * from "./common";
 export * from "./retry";
 export * from "./folder";
-export { uploadXet } from "./xet";
+export { uploadXet, uploadXetBatch, type XetBatchEntry } from "./xet";
 export { uploadS3Multipart } from "./s3";
 export { uploadChunkRelay } from "./chunk-relay";
 export { uploadGraphSession, graphNextOffset } from "./graph";
